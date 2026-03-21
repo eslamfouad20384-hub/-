@@ -36,7 +36,8 @@ def fetch_market_list():
         params["page"] = page
         try:
             data = requests.get(url, params=params, timeout=10).json()
-            all_coins.extend(data)
+            if isinstance(data, list):
+                all_coins.extend(data)
         except:
             continue
         time.sleep(1)
@@ -45,14 +46,16 @@ def fetch_market_list():
 def filter_coins(coins):
     filtered = []
     for coin in coins:
+        if not isinstance(coin, dict):
+            continue
         price = coin.get("current_price")
         volume = coin.get("total_volume")
         change_30d = coin.get("price_change_percentage_30d_in_currency")
-        if price is None:
+        if price is None or volume is None or change_30d is None:
             continue
         if volume < MIN_VOLUME:
             continue
-        if change_30d is None or change_30d > DROP_THRESHOLD:
+        if change_30d > DROP_THRESHOLD:
             continue
         filtered.append(coin)
     return filtered
@@ -108,10 +111,6 @@ def add_indicators(df):
 def analyze_coin(coin):
     try:
         symbol = coin["symbol"].upper()
-        price = coin.get("current_price")
-        volume = coin.get("total_volume")
-        change_30d = coin.get("price_change_percentage_30d_in_currency")
-
         df = fetch_ohlc_cryptocompare(symbol)
         if df.empty or len(df) < RSI_PERIOD:
             return None
