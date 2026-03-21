@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف مناطق التجميع + توقع الصعود (200 عملة)")
+st.title("📊 كاشف مناطق التجميع + توقع الصعود (فلتر + 200 عملة)")
 
 # ==============================
 # إعدادات
@@ -22,7 +22,6 @@ TOTAL_COINS = 200
 # ==============================
 # جلب البيانات من CoinGecko
 # ==============================
-
 def get_markets():
     all_coins = []
     pages = TOTAL_COINS // 100 + (TOTAL_COINS % 100 > 0)
@@ -45,9 +44,28 @@ def get_markets():
     return all_coins[:TOTAL_COINS]
 
 # ==============================
+# فلترة العملات قبل جلب OHLC
+# ==============================
+def filter_coins(coins):
+    filtered = []
+    for coin in coins:
+        price = coin.get("current_price")
+        volume = coin.get("total_volume")
+        change_30d = coin.get("price_change_percentage_30d_in_currency", 0)
+
+        if price is None:
+            continue
+        if volume < MIN_VOLUME:
+            continue
+        if change_30d > DROP_THRESHOLD:
+            continue
+
+        filtered.append(coin)
+    return filtered
+
+# ==============================
 # جلب OHLC من CoinGecko
 # ==============================
-
 def get_ohlc(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
     params = {"vs_currency": "usd", "days": 7}
@@ -60,15 +78,11 @@ def get_ohlc(coin_id):
         return pd.DataFrame()
 
 # ==============================
-# جلب البيانات من CryptoCompare (بدون مفتاح)
+# جلب السعر من CryptoCompare بدون مفتاح
 # ==============================
-
 def get_price_cryptocompare(symbol):
     url = f"https://min-api.cryptocompare.com/data/price"
-    params = {
-        "fsym": symbol.upper(),
-        "tsyms": "USD"
-    }
+    params = {"fsym": symbol.upper(), "tsyms": "USD"}
     try:
         response = requests.get(url, params=params, timeout=10).json()
         return response.get("USD", None)
@@ -78,7 +92,6 @@ def get_price_cryptocompare(symbol):
 # ==============================
 # RSI
 # ==============================
-
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -91,7 +104,6 @@ def calculate_rsi(series, period=14):
 # ==============================
 # Score التجميع
 # ==============================
-
 def calculate_score(touches, drop, range_ratio, rsi, volume):
     score = 0
     if touches >= 4:
@@ -124,7 +136,6 @@ def calculate_score(touches, drop, range_ratio, rsi, volume):
 # ==============================
 # توقع الصعود %
 # ==============================
-
 def predict_up_probability(score, rsi, volume, range_ratio, price, high):
     prob = 0
     prob += (score / 10) * 40
@@ -145,7 +156,6 @@ def predict_up_probability(score, rsi, volume, range_ratio, price, high):
 # ==============================
 # تحليل العملة
 # ==============================
-
 def analyze_coin(coin):
     try:
         coin_id = coin["id"]
@@ -156,9 +166,6 @@ def analyze_coin(coin):
         change_30d = coin.get("price_change_percentage_30d_in_currency", 0)
 
         if price is None or volume < MIN_VOLUME:
-            return None
-
-        if change_30d is None or change_30d > DROP_THRESHOLD:
             return None
 
         df = get_ohlc(coin_id)
@@ -220,19 +227,19 @@ def analyze_coin(coin):
 # ==============================
 # تشغيل البرنامج
 # ==============================
-
 if st.button("🚀 ابدأ الفحص"):
-    st.write(f"⏳ جاري فحص {TOTAL_COINS} عملة مع OHLC...")
+    st.write(f"⏳ جاري فحص {TOTAL_COINS} عملة بعد الفلترة...")
 
     coins = get_markets()
+    filtered_coins = filter_coins(coins)
     results = []
 
     progress_text = st.empty()
     progress_bar = st.progress(0)
-    total = len(coins)
+    total = len(filtered_coins)
 
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
-        futures = [executor.submit(analyze_coin, coin) for coin in coins]
+        futures = [executor.submit(analyze_coin, coin) for coin in filtered_coins]
 
         for i, future in enumerate(futures):
             result = future.result()
