@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف مناطق التجميع + توقع الصعود (500 عملة)")
+st.title("📊 كاشف مناطق التجميع + توقع الصعود (200 عملة)")
 
 # ==============================
 # إعدادات
@@ -15,16 +15,18 @@ DROP_THRESHOLD = -20
 RANGE_THRESHOLD = 0.15
 RSI_LOW = 25
 RSI_HIGH = 55
-THREADS = 5
-DELAY = 0.5  # ثانية بين كل طلب OHLC
+THREADS = 3
+DELAY = 1  # ثانية لكل طلب OHLC
+TOTAL_COINS = 200
 
 # ==============================
-# جلب البيانات
+# جلب البيانات من CoinGecko
 # ==============================
 
 def get_markets():
     all_coins = []
-    for page in range(1, 6):  # 5 صفحات × 100 عملة = 500 عملة
+    pages = TOTAL_COINS // 100 + (TOTAL_COINS % 100 > 0)
+    for page in range(1, pages + 1):
         url = "https://api.coingecko.com/api/v3/coins/markets"
         params = {
             "vs_currency": "usd",
@@ -39,8 +41,12 @@ def get_markets():
             all_coins.extend(data)
         except Exception as e:
             st.warning(f"⚠️ خطأ في الصفحة {page}: {e}")
-        time.sleep(1)  # delay لتجنب rate limit
-    return all_coins
+        time.sleep(1)
+    return all_coins[:TOTAL_COINS]
+
+# ==============================
+# جلب OHLC من CoinGecko
+# ==============================
 
 def get_ohlc(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
@@ -48,10 +54,26 @@ def get_ohlc(coin_id):
     try:
         data = requests.get(url, params=params, timeout=10).json()
         df = pd.DataFrame(data, columns=["time","open","high","low","close"])
-        time.sleep(DELAY)  # delay لكل طلب OHLC
+        time.sleep(DELAY)
         return df
     except:
-        return pd.DataFrame()  # لو فشل ترجع فاضي
+        return pd.DataFrame()
+
+# ==============================
+# جلب البيانات من CryptoCompare (بدون مفتاح)
+# ==============================
+
+def get_price_cryptocompare(symbol):
+    url = f"https://min-api.cryptocompare.com/data/price"
+    params = {
+        "fsym": symbol.upper(),
+        "tsyms": "USD"
+    }
+    try:
+        response = requests.get(url, params=params, timeout=10).json()
+        return response.get("USD", None)
+    except:
+        return None
 
 # ==============================
 # RSI
@@ -127,12 +149,13 @@ def predict_up_probability(score, rsi, volume, range_ratio, price, high):
 def analyze_coin(coin):
     try:
         coin_id = coin["id"]
-        name = coin["symbol"].upper()
-        price = coin["current_price"]
+        symbol = coin["symbol"].upper()
+        name = symbol
+        price = coin.get("current_price") or get_price_cryptocompare(symbol)
         volume = coin["total_volume"]
         change_30d = coin.get("price_change_percentage_30d_in_currency", 0)
 
-        if volume < MIN_VOLUME:
+        if price is None or volume < MIN_VOLUME:
             return None
 
         if change_30d is None or change_30d > DROP_THRESHOLD:
@@ -140,7 +163,6 @@ def analyze_coin(coin):
 
         df = get_ohlc(coin_id)
         if df.empty:
-            # لو OHLC فاضي، رجع بيانات تقريبة
             score = 1
             prob = 10
             return {
@@ -159,10 +181,7 @@ def analyze_coin(coin):
         low = df["low"].min()
         range_ratio = (high - low) / low
 
-        if range_ratio > RANGE_THRESHOLD:
-            return None
-
-        if price < low * 1.02:
+        if range_ratio > RANGE_THRESHOLD or price < low * 1.02:
             return None
 
         df["RSI"] = calculate_rsi(df["close"])
@@ -203,7 +222,7 @@ def analyze_coin(coin):
 # ==============================
 
 if st.button("🚀 ابدأ الفحص"):
-    st.write("⏳ جاري فحص 500 عملة مع OHLC...")
+    st.write(f"⏳ جاري فحص {TOTAL_COINS} عملة مع OHLC...")
 
     coins = get_markets()
     results = []
@@ -226,7 +245,6 @@ if st.button("🚀 ابدأ الفحص"):
     if results:
         df = pd.DataFrame(results)
         df = df.sort_values(by="احتمال الصعود %", ascending=False)
-
         st.success(f"✅ تم العثور على {len(df)} فرصة قوية")
         st.dataframe(df, use_container_width=True)
     else:
