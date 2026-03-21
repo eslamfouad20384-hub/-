@@ -4,7 +4,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف مناطق التجميع + توقع الصعود (PRO MAX)")
+st.title("📊 كاشف مناطق التجميع + توقع الصعود (500 عملة)")
 
 # ==============================
 # إعدادات
@@ -20,15 +20,19 @@ RSI_HIGH = 50
 # ==============================
 
 def get_markets():
-    url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {
-        "vs_currency": "usd",
-        "order": "volume_desc",
-        "per_page": 100,
-        "page": 1,
-        "price_change_percentage": "30d"
-    }
-    return requests.get(url, params=params).json()
+    all_coins = []
+    for page in range(1, 6):  # 5 صفحات × 100 عملة = 500 عملة
+        url = "https://api.coingecko.com/api/v3/coins/markets"
+        params = {
+            "vs_currency": "usd",
+            "order": "volume_desc",
+            "per_page": 100,
+            "page": page,
+            "price_change_percentage": "30d"
+        }
+        data = requests.get(url, params=params).json()
+        all_coins.extend(data)
+    return all_coins
 
 def get_ohlc(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc"
@@ -90,30 +94,24 @@ def calculate_score(touches, drop, range_ratio, rsi, volume):
 
 def predict_up_probability(score, rsi, volume, range_ratio, price, high):
     prob = 0
-
     # 1. Score
     prob += (score / 10) * 40
-
     # 2. RSI
     if 35 <= rsi <= 45:
         prob += 20
     elif 30 < rsi < 50:
         prob += 10
-
     # 3. Volume
     if volume > MIN_VOLUME * 2:
         prob += 20
     elif volume > MIN_VOLUME:
         prob += 10
-
     # 4. ضيق النطاق
     if range_ratio < 0.05:
         prob += 10
-
     # 5. قرب المقاومة
     if price > high * 0.95:
         prob += 10
-
     return round(min(prob, 100), 1)
 
 # ==============================
@@ -157,7 +155,6 @@ def analyze_coin(coin):
         touches = sum(df["low"] <= low * 1.02)
 
         score = calculate_score(touches, change_30d, range_ratio, rsi, volume)
-
         prob = predict_up_probability(score, rsi, volume, range_ratio, price, high)
 
         # تصنيف
@@ -188,12 +185,13 @@ def analyze_coin(coin):
 # ==============================
 
 if st.button("🚀 ابدأ الفحص"):
-    st.write("⏳ جاري فحص السوق...")
+    st.write("⏳ جاري فحص 500 عملة...")
 
     coins = get_markets()
     results = []
 
-    progress = st.progress(0)
+    progress_text = st.empty()
+    progress_bar = st.progress(0)
     total = len(coins)
 
     with ThreadPoolExecutor(max_workers=10) as executor:
@@ -204,7 +202,8 @@ if st.button("🚀 ابدأ الفحص"):
             if result:
                 results.append(result)
 
-            progress.progress((i + 1) / total)
+            progress_text.text(f"جاري الفحص: {i+1}/{total} عملة")
+            progress_bar.progress((i + 1) / total)
 
     if results:
         df = pd.DataFrame(results)
@@ -212,6 +211,5 @@ if st.button("🚀 ابدأ الفحص"):
 
         st.success(f"✅ تم العثور على {len(df)} فرصة قوية")
         st.dataframe(df, use_container_width=True)
-
     else:
         st.warning("❌ لا يوجد فرص حالياً")
