@@ -51,14 +51,14 @@ def filter_coins(coins):
     for coin in coins:
         price = coin.get("current_price")
         volume = coin.get("total_volume")
-        change_30d = coin.get("price_change_percentage_30d_in_currency", 0)
+        change_30d = coin.get("price_change_percentage_30d_in_currency")
 
         if price is None:
-            continue
+            continue  # استبعد العملات بدون سعر
         if volume < MIN_VOLUME:
-            continue
-        if change_30d > DROP_THRESHOLD:
-            continue
+            continue  # استبعد العملات قليلة التداول
+        if change_30d is None or change_30d > DROP_THRESHOLD:
+            continue  # استبعد العملات اللي ما خسرتش كتير أو مش معروف عنها تغيير 30 يوم
 
         filtered.append(coin)
     return filtered
@@ -163,19 +163,19 @@ def analyze_coin(coin):
         name = symbol
         price = coin.get("current_price") or get_price_cryptocompare(symbol)
         volume = coin["total_volume"]
-        change_30d = coin.get("price_change_percentage_30d_in_currency", 0)
+        change_30d = coin.get("price_change_percentage_30d_in_currency")
 
         if price is None or volume < MIN_VOLUME:
             return None
 
         df = get_ohlc(coin_id)
-        if df.empty:
+        if df.empty or len(df) < 14:
             score = 1
             prob = 10
             return {
                 "العملة": name,
                 "السعر": price,
-                "التغيير 30 يوم %": round(change_30d, 2),
+                "التغيير 30 يوم %": round(change_30d, 2) if change_30d is not None else None,
                 "RSI": None,
                 "النطاق %": None,
                 "لمسات الدعم": 0,
@@ -194,12 +194,12 @@ def analyze_coin(coin):
         df["RSI"] = calculate_rsi(df["close"])
         rsi = df["RSI"].iloc[-1]
 
-        if rsi is None or not (RSI_LOW < rsi < RSI_HIGH):
+        if pd.isna(rsi) or not (RSI_LOW < rsi < RSI_HIGH):
             return None
 
         touches = sum(df["low"] <= low * 1.02)
 
-        score = calculate_score(touches, change_30d, range_ratio, rsi, volume)
+        score = calculate_score(touches, change_30d or 0, range_ratio, rsi, volume)
         prob = predict_up_probability(score, rsi, volume, range_ratio, price, high)
 
         if score >= 8:
@@ -212,7 +212,7 @@ def analyze_coin(coin):
         return {
             "العملة": name,
             "السعر": price,
-            "التغيير 30 يوم %": round(change_30d, 2),
+            "التغيير 30 يوم %": round(change_30d, 2) if change_30d is not None else None,
             "RSI": round(rsi, 2),
             "النطاق %": round(range_ratio * 100, 2),
             "لمسات الدعم": touches,
