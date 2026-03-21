@@ -6,16 +6,16 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف مناطق التجميع + RSI (500 عملة مؤهلة)")
+st.title("📊 كاشف مناطق التجميع + RSI (600 عملة مؤهلة)")
 
 # ==============================
 # إعدادات
 # ==============================
-MIN_VOLUME = 500_000         
-DROP_THRESHOLD = -10         
+MIN_VOLUME = 200_000         
+DROP_THRESHOLD = -5         
 THREADS = 3
 DELAY = 1                    
-TOTAL_COINS = 500            
+TOTAL_COINS = 600            
 RSI_PERIOD = 14
 
 # ==============================
