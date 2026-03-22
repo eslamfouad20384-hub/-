@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(layout="wide")
-st.title("👑 Crypto Smart Money Scanner ELITE - شراء + Target احترافي للبيع")
+st.title("👑 Crypto Smart Money Scanner ELITE - Target احترافي + فرص مراقبة")
 
 # ==============================
 # إعدادات
@@ -65,7 +65,7 @@ def get_real_support(df):
     return df['pivot_low'].mode()[0]
 
 # ==============================
-# Target للبيع الاحترافي
+# Target احترافي للبيع
 def get_real_target(df, current_price):
     # 1️⃣ HVN / High Volume Nodes
     df['pivot_high'] = df['high'].rolling(5).max()
@@ -156,6 +156,10 @@ def analyze_coin(coin):
         else:
             signal = "⚪ ضعيف"
 
+        # لو لسه السعر ما وصلش للـ Target النهائي لكن باقي الشروط متحققة → فرصة مراقبة
+        if not smart_setup and score >= 40:
+            signal = "🟡 مراقبة"
+
         return {
             "العملة": coin["symbol"].upper(),
             "السعر": round(current_price, 4),
@@ -196,7 +200,7 @@ if st.button("🚀 فحص السوق"):
 
     if results:
         df = pd.DataFrame(results)
-        # ترتيب الفرص حسب الأقوى
+        # ترتيب الفرص حسب القوة: Setup → Score → Probability
         df = df.sort_values(by=["Setup", "Score", "احتمال %"], ascending=False)
         st.success(f"🔥 تم العثور على {len(df)} فرصة")
         st.dataframe(df, use_container_width=True)
