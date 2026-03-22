@@ -7,19 +7,19 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة محسنة 4.0)")
+st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة محسنة 5.0)")
 
 # ==============================
 # إعدادات
 # ==============================
 MIN_VOLUME = 2_000_000
 DROP_THRESHOLD = -20
-THREADS = 3
-DELAY = 1  # ثانية لكل طلب OHLC
-TOTAL_COINS = 200
+THREADS = 5           # عدد الخيوط للفحص المتوازي
+DELAY = 1             # ثانية لكل طلب OHLC
+TOTAL_COINS = 1000    # عدد العملات المؤهلة للفحص
 RSI_PERIOD = 14
-OHLC_DAYS = 30  # آخر 30 يوم
-CACHE_DIR = "cache"  # مجلد تخزين البيانات
+OHLC_DAYS = 30        # آخر 30 يوم
+CACHE_DIR = "cache"   # مجلد تخزين البيانات
 
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
