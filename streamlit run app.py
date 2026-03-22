@@ -7,7 +7,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة محسنة 5.2)")
+st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة اختبار 200 عملة)")
 
 # ==============================
 # إعدادات
@@ -16,7 +16,7 @@ MIN_VOLUME = 2_000_000
 DROP_THRESHOLD = -20
 THREADS = 5
 DELAY = 1
-TOTAL_COINS = 1000
+TOTAL_COINS = 200   # تم تعديل العدد إلى 200 للعملية التجريبية
 RSI_PERIOD = 14
 OHLC_DAYS = 30
 CACHE_DIR = "cache"
@@ -80,7 +80,7 @@ def fetch_ohlc_daily(symbol):
             return pd.DataFrame()
         df = pd.DataFrame(prices, columns=["time", "close"])
         df["time"] = pd.to_datetime(df["time"], unit='ms')
-        # حساب OHLC تقريبي يومي
+        # OHLC تقريبي يومي
         df = df.set_index("time").resample("1D").agg({"close": "last"})
         df["open"] = df["close"]
         df["high"] = df["close"]
