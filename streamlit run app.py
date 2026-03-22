@@ -6,29 +6,23 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(layout="wide")
-st.title("👑 Crypto Smart Money Scanner ELITE")
+st.title("👑 Crypto Smart Money Scanner ELITE - Target حقيقي")
 
 # ==============================
 # إعدادات
-# ==============================
 MIN_VOLUME = 2_000_000
 TOTAL_COINS = 150
 RSI_PERIOD = 14
 OHLC_DAYS = 30
 MAX_WORKERS = 12
+SIDEWAYS_RANGE = 0.08
+VOL_MULTIPLIER = 1.2
 
 # ==============================
 # جلب السوق
-# ==============================
 def fetch_market_list():
     url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {
-        "vs_currency": "usd",
-        "order": "volume_desc",
-        "per_page": 100,
-        "page": 1
-    }
-
+    params = {"vs_currency": "usd", "order": "volume_desc", "per_page": 100, "page": 1}
     coins = []
     for page in range(1, 3):
         params["page"] = page
@@ -38,18 +32,15 @@ def fetch_market_list():
         except:
             continue
         time.sleep(1)
-
     return coins[:TOTAL_COINS]
 
 # ==============================
 # OHLC
-# ==============================
 def fetch_ohlc(symbol):
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{symbol}/ohlc"
         params = {"vs_currency": "usd", "days": OHLC_DAYS}
         data = requests.get(url, params=params, timeout=10).json()
-
         df = pd.DataFrame(data, columns=["time","open","high","low","close"])
         df["time"] = pd.to_datetime(df["time"], unit='ms')
         return df
@@ -58,7 +49,6 @@ def fetch_ohlc(symbol):
 
 # ==============================
 # RSI
-# ==============================
 def calculate_rsi(df):
     delta = df["close"].diff()
     gain = delta.clip(lower=0)
@@ -69,8 +59,27 @@ def calculate_rsi(df):
     return 100 - (100 / (1 + rs))
 
 # ==============================
-# تحليل العملة
+# إيجاد الدعم الحقيقي
+def get_real_support(df):
+    df['pivot_low'] = df['low'].rolling(5).min()
+    return df['pivot_low'].mode()[0]  # القاع الأكثر تكرارًا
+
 # ==============================
+# إيجاد المقاومة الحقيقية (Target)
+def get_real_target(df, current_price):
+    df['pivot_high'] = df['high'].rolling(5).max()
+    highs = df['pivot_high'].unique()
+    # أي مقاومة أعلى السعر الحالي
+    resistance_levels = [h for h in highs if h > current_price]
+    if resistance_levels:
+        return min(resistance_levels)  # أقرب مقاومة فوق السعر الحالي
+    else:
+        # لو مفيش مقاومة واضحة فوق، نستخدم المسافة التقليدية
+        support = get_real_support(df)
+        return current_price + (current_price - support) * 1.5
+
+# ==============================
+# تحليل العملة
 def analyze_coin(coin):
     try:
         if coin["total_volume"] < MIN_VOLUME:
@@ -78,48 +87,37 @@ def analyze_coin(coin):
 
         symbol = coin["id"]
         df = fetch_ohlc(symbol)
-
         if df.empty or len(df) < 20:
             return None
 
+        # مؤشرات
         df["rsi"] = calculate_rsi(df)
         df["ema50"] = df["close"].ewm(span=50).mean()
         df["ema200"] = df["close"].ewm(span=200).mean()
-
         latest = df.iloc[-1]
 
-        # ==============================
-        # 🔻 الهبوط الحقيقي
-        # ==============================
+        # الهبوط الحقيقي
         max_price = df["high"].max()
         current_price = latest["close"]
         drop_percent = ((current_price - max_price) / max_price) * 100
 
-        # ==============================
-        # ➖ الحركة العرضية
-        # ==============================
+        # الحركة العرضية
         recent = df.tail(10)
         high = recent["high"].max()
         low = recent["low"].min()
         range_percent = (high - low) / low
-        sideways = range_percent < 0.08
+        sideways = range_percent < SIDEWAYS_RANGE
 
-        # ==============================
-        # 🤏 الضغط
-        # ==============================
+        # الضغط
         volatility = recent["close"].std()
         low_volatility = volatility < (recent["close"].mean() * 0.02)
 
-        # ==============================
-        # 📊 الفوليوم
-        # ==============================
+        # Volume Rising
         volume_now = coin["total_volume"]
         volume_avg = volume_now / 30
-        volume_rising = volume_now > volume_avg * 1.2
+        volume_rising = volume_now > volume_avg * VOL_MULTIPLIER
 
-        # ==============================
-        # 💣 Smart Money Setup
-        # ==============================
+        # Smart Money Setup
         smart_setup = (
             drop_percent < -25 and
             sideways and
@@ -127,35 +125,20 @@ def analyze_coin(coin):
             volume_rising
         )
 
-        # ==============================
-        # 🧠 AI Score
-        # ==============================
+        # AI Score
         score = 0
-
-        if smart_setup:
-            score += 50
-
-        if latest["rsi"] < 45:
-            score += 15
-
-        if latest["ema50"] > latest["ema200"]:
-            score += 15
-
-        if drop_percent < -40:
-            score += 10
-
+        if smart_setup: score += 50
+        if latest["rsi"] < 45: score += 15
+        if latest["ema50"] > latest["ema200"]: score += 15
+        if drop_percent < -40: score += 10
         probability = int(min(95, max(5, score * 1.2)))
 
-        # ==============================
-        # 📈 دعم واهداف
-        # ==============================
-        support = df["low"].tail(10).min()
-        target = current_price + (current_price - support) * 1.5
+        # الدعم والهدف الحقيقي
+        support = get_real_support(df)
         stop_loss = support * 0.97
+        target = get_real_target(df, current_price)
 
-        # ==============================
-        # التقييم
-        # ==============================
+        # التقييم النهائي
         if smart_setup and score >= 60:
             signal = "🚀 انفجار محتمل"
         elif score >= 40:
@@ -183,18 +166,15 @@ def analyze_coin(coin):
 
 # ==============================
 # تشغيل
-# ==============================
 if st.button("🚀 فحص السوق"):
     st.info("⏳ جاري البحث عن فرص الانفجار...")
 
     coins = fetch_market_list()
     results = []
-
     progress = st.progress(0)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [executor.submit(analyze_coin, coin) for coin in coins]
-
         for i, f in enumerate(as_completed(futures)):
             try:
                 res = f.result()
@@ -202,20 +182,12 @@ if st.button("🚀 فحص السوق"):
                     results.append(res)
             except:
                 pass
-
             progress.progress((i+1)/len(futures))
 
     if results:
         df = pd.DataFrame(results)
-
-        df = df.sort_values(
-            by=["Setup", "Score", "احتمال %"],
-            ascending=False
-        )
-
+        df = df.sort_values(by=["Setup", "Score", "احتمال %"], ascending=False)
         st.success(f"🔥 تم العثور على {len(df)} فرصة")
-
         st.dataframe(df, use_container_width=True)
-
     else:
         st.warning("❌ لا توجد فرص حالياً")
