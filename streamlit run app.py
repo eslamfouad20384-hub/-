@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف مناطق التجميع + RSI (نسخة محسنة 2.0)")
+st.title("📊 كاشف مناطق التجميع + RSI (نسخة محسنة 3.0)")
 
 # ==============================
 # إعدادات
@@ -17,6 +17,7 @@ THREADS = 3
 DELAY = 1  # ثانية لكل طلب OHLC
 TOTAL_COINS = 200
 RSI_PERIOD = 14
+OHLC_DAYS = 30  # آخر 30 يوم
 
 # ==============================
 # أدوات مساعدة
@@ -42,7 +43,6 @@ def fetch_market_list():
         time.sleep(1)
     return all_coins[:TOTAL_COINS]
 
-# فلترة ذكية قبل تحميل OHLC
 def pre_filter_coins(coins):
     filtered = []
     for coin in coins:
@@ -56,12 +56,14 @@ def pre_filter_coins(coins):
         filtered.append(coin)
     return filtered
 
-def fetch_ohlc_cryptocompare(symbol):
+def fetch_ohlc_daily(symbol):
+    """جلب بيانات يومية لآخر 30 يوم من CoinGecko"""
     try:
-        url = "https://min-api.cryptocompare.com/data/v2/histohour"
-        params = {"fsym": symbol.upper(), "tsyms": "USD", "limit": 200}
+        url = f"https://api.coingecko.com/api/v3/coins/{symbol.lower()}/ohlc"
+        params = {"vs_currency": "usd", "days": OHLC_DAYS}
         r = requests.get(url, params=params, timeout=10).json()
-        df = pd.DataFrame(r["Data"]["Data"])
+        df = pd.DataFrame(r, columns=["time","open","high","low","close"])
+        df["time"] = pd.to_datetime(df["time"], unit='ms')
         time.sleep(DELAY)
         return df
     except:
@@ -96,8 +98,8 @@ def calculate_score(df):
         score += 20
     if "volumeto" not in df.columns:
         df["volumeto"] = df.get("volumefrom", 0) * df["close"]
-    avg_vol = df["volumeto"].rolling(20).mean().iloc[-1]
-    if latest["volumeto"] > avg_vol:
+    avg_vol = df["volumeto"].rolling(20).mean().iloc[-1] if "volumeto" in df else 0
+    if latest.get("volumeto",0) > avg_vol:
         score += 10
     return score
 
@@ -106,29 +108,25 @@ def calculate_score(df):
 # ==============================
 def analyze_coin(coin):
     try:
-        symbol = coin["symbol"].upper()
-        df = fetch_ohlc_cryptocompare(symbol)
+        symbol = coin["symbol"]
+        df = fetch_ohlc_daily(symbol)
         if df.empty or len(df) < RSI_PERIOD:
             return None
-
         df = add_indicators(df)
         score = calculate_score(df)
-
         latest_price = df.iloc[-1]["close"]
         high = df["high"].max()
         low = df["low"].min()
         range_pct = (high - low)/low
         touches = sum(df["low"] <= low*1.02)
-
         if score >= 50:
             signal = "🔥 فرصة قوية"
         elif score >= 30:
             signal = "🟡 فرصة متوسطة"
         else:
             signal = "⚪ ضعيف"
-
         return {
-            "العملة": symbol,
+            "العملة": symbol.upper(),
             "السعر": latest_price,
             "RSI": round(df["rsi"].iloc[-1],2),
             "Score": score,
@@ -144,12 +142,11 @@ def analyze_coin(coin):
 # ==============================
 def color_score(val):
     if val == "🔥 فرصة قوية":
-        color = 'background-color: #FF5733; color: white'
+        return 'background-color: #FF5733; color: white'
     elif val == "🟡 فرصة متوسطة":
-        color = 'background-color: #FFC300; color: black'
+        return 'background-color: #FFC300; color: black'
     else:
-        color = 'background-color: #C0C0C0; color: black'
-    return color
+        return 'background-color: #C0C0C0; color: black'
 
 # ==============================
 # تشغيل البرنامج
