@@ -7,19 +7,19 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة نهائية 5.1)")
+st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة محسنة 5.2)")
 
 # ==============================
 # إعدادات
 # ==============================
 MIN_VOLUME = 2_000_000
 DROP_THRESHOLD = -20
-THREADS = 5           # عدد الخيوط للفحص المتوازي
-DELAY = 1             # ثانية لكل طلب OHLC
-TOTAL_COINS = 1000    # عدد العملات المؤهلة للفحص
+THREADS = 5
+DELAY = 1
+TOTAL_COINS = 1000
 RSI_PERIOD = 14
-OHLC_DAYS = 30        # آخر 30 يوم
-CACHE_DIR = "cache"   # مجلد تخزين البيانات
+OHLC_DAYS = 30
+CACHE_DIR = "cache"
 
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
@@ -66,18 +66,26 @@ def pre_filter_coins(coins):
     return filtered
 
 def fetch_ohlc_daily(symbol):
-    """جلب بيانات يومية لآخر 30 يوم مع التخزين المؤقت"""
     cache_file = os.path.join(CACHE_DIR, f"{symbol}_ohlc.csv")
     if os.path.exists(cache_file):
         df = pd.read_csv(cache_file, parse_dates=["time"])
         if (pd.Timestamp.now() - df["time"].max()).days < 1:
             return df
     try:
-        url = f"https://api.coingecko.com/api/v3/coins/{symbol.lower()}/ohlc"
+        url = f"https://api.coingecko.com/api/v3/coins/{symbol.lower()}/market_chart"
         params = {"vs_currency": "usd", "days": OHLC_DAYS}
         r = requests.get(url, params=params, timeout=10).json()
-        df = pd.DataFrame(r, columns=["time", "open", "high", "low", "close"])
+        prices = r.get("prices", [])
+        if not prices:
+            return pd.DataFrame()
+        df = pd.DataFrame(prices, columns=["time", "close"])
         df["time"] = pd.to_datetime(df["time"], unit='ms')
+        # حساب OHLC تقريبي يومي
+        df = df.set_index("time").resample("1D").agg({"close": "last"})
+        df["open"] = df["close"]
+        df["high"] = df["close"]
+        df["low"] = df["close"]
+        df.reset_index(inplace=True)
         df.to_csv(cache_file, index=False)
         time.sleep(DELAY)
         return df
@@ -111,16 +119,8 @@ def calculate_score(df):
         score += 20
     if latest["ema50"] > latest["ema200"]:
         score += 20
-    if "volumeto" not in df.columns:
-        df["volumeto"] = df.get("volumefrom", 0) * df["close"]
-    avg_vol = df["volumeto"].rolling(20).mean().iloc[-1] if "volumeto" in df else 0
-    if latest.get("volumeto", 0) > avg_vol:
-        score += 10
     return score
 
-# ==============================
-# تحليل عملة واحدة
-# ==============================
 def analyze_coin(coin):
     try:
         symbol = coin["symbol"]
@@ -152,9 +152,6 @@ def analyze_coin(coin):
     except:
         return None
 
-# ==============================
-# عرض الجدول بالألوان
-# ==============================
 def color_score(val):
     if val == "🔥 فرصة قوية":
         return 'background-color: #FF5733; color: white'
@@ -163,9 +160,6 @@ def color_score(val):
     else:
         return 'background-color: #C0C0C0; color: black'
 
-# ==============================
-# تشغيل البرنامج
-# ==============================
 if st.button("🚀 ابدأ الفحص"):
     st.info(f"⏳ جاري فحص {TOTAL_COINS} عملة بعد الفلترة...")
     coins = fetch_market_list()
@@ -197,11 +191,8 @@ if st.button("🚀 ابدأ الفحص"):
     if results:
         df_results = pd.DataFrame(results)
         df_results = df_results.sort_values(by="Score", ascending=False)
-
-        # عداد النجاح والفشل حسب التقييم
         success_count = df_results[df_results["التقييم"].isin(["🔥 فرصة قوية", "🟡 فرصة متوسطة"])].shape[0]
         fail_count = df_results[df_results["التقييم"] == "⚪ ضعيف"].shape[0]
-
         st.success(f"✅ عدد العملات الناجحة حسب التقييم: {success_count} | عدد العملات الفاشلة: {fail_count}")
         st.dataframe(df_results.style.applymap(color_score, subset=["التقييم"]), use_container_width=True)
     else:
