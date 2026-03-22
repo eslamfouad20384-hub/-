@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(layout="wide")
-st.title("👑 Crypto Smart Money ")
+st.title(" Smart Money ")
 
 # ==============================
 # إعدادات
