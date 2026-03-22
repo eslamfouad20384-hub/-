@@ -69,12 +69,10 @@ def get_real_support(df):
 def get_real_target(df, current_price):
     df['pivot_high'] = df['high'].rolling(5).max()
     highs = df['pivot_high'].unique()
-    # أي مقاومة أعلى السعر الحالي
     resistance_levels = [h for h in highs if h > current_price]
     if resistance_levels:
         return min(resistance_levels)  # أقرب مقاومة فوق السعر الحالي
     else:
-        # لو مفيش مقاومة واضحة فوق، نستخدم المسافة التقليدية
         support = get_real_support(df)
         return current_price + (current_price - support) * 1.5
 
@@ -189,14 +187,15 @@ if st.button("🚀 فحص السوق"):
         # ترتيب العملات حسب Score من الأعلى للأقل
         df = df.sort_values(by="Score", ascending=False)
 
-        # ترتيب الأعمدة حسب طلبك + الغاء ترقيم الصفوف
+        # ترتيب الأعمدة حسب طلبك
         columns_order = ["العملة", "السعر", "هبوط %", "Setup", "التقييم",
                          "RSI", "Score", "احتمال %",
                          "Range %", "Support", "Target", "StopLoss"]
         df = df[columns_order]
-        df = df.reset_index(drop=True)  # الغي ترقيم الصفوف
+
+        # عرض الجدول بدون ترقيم الصفوف
+        st.table(df.to_dict(orient="records"))
 
         st.success(f"🔥 تم العثور على {len(df)} فرصة")
-        st.dataframe(df, use_container_width=True)
     else:
         st.warning("❌ لا توجد فرص حالياً")
