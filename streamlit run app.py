@@ -6,14 +6,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(layout="wide")
-st.title("👑 Crypto Smart Money Scanner ELITE ")
+st.title("👑 Crypto Smart Money Scanner ELITE - Target حقيقي")
 
 # ==============================
 # إعدادات
 MIN_VOLUME = 2_000_000
 TOTAL_COINS = 150
 RSI_PERIOD = 14
-OHLC_DAYS = 30  # بدل 60
+OHLC_DAYS = 30  # آخر 30 شمعة
 MAX_WORKERS = 12
 SIDEWAYS_RANGE = 0.08
 VOL_MULTIPLIER = 1.2
@@ -39,7 +39,7 @@ def fetch_market_list():
 def fetch_ohlc(symbol):
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{symbol}/ohlc"
-        params = {"vs_currency": "usd", "days": OHLC_DAYS}
+        params = {"vs_currency": "usd", "days": OHLC_DAYS}  # آخر 30 شمعة
         data = requests.get(url, params=params, timeout=10).json()
         df = pd.DataFrame(data, columns=["time","open","high","low","close"])
         df["time"] = pd.to_datetime(df["time"], unit='ms')
@@ -59,34 +59,24 @@ def calculate_rsi(df):
     return 100 - (100 / (1 + rs))
 
 # ==============================
-# دعم حقيقي
+# إيجاد الدعم الحقيقي
 def get_real_support(df):
     df['pivot_low'] = df['low'].rolling(5).min()
-    return df['pivot_low'].mode()[0]
+    return df['pivot_low'].mode()[0]  # القاع الأكثر تكرارًا
 
 # ==============================
-# Target احترافي للبيع
+# إيجاد المقاومة الحقيقية (Target)
 def get_real_target(df, current_price):
-    # 1️⃣ HVN / High Volume Nodes
     df['pivot_high'] = df['high'].rolling(5).max()
     highs = df['pivot_high'].unique()
-    resistance_HVN = [h for h in highs if h > current_price]
-
-    # 2️⃣ مستوى Fibonacci 1.618
-    support = get_real_support(df)
-    target_fibo = current_price + (current_price - support) * 1.618
-
-    # 3️⃣ مستويات نفسية
-    round_levels = [round(x, 0) for x in range(int(current_price), int(current_price*1.5))]
-    psychological_levels = [lvl for lvl in round_levels if lvl > current_price]
-
-    # جمع كل المستويات
-    target_candidates = resistance_HVN + [target_fibo] + psychological_levels
-
-    if target_candidates:
-        return min(target_candidates)  # أقرب مستوى فوق السعر الحالي
+    # أي مقاومة أعلى السعر الحالي
+    resistance_levels = [h for h in highs if h > current_price]
+    if resistance_levels:
+        return min(resistance_levels)  # أقرب مقاومة فوق السعر الحالي
     else:
-        return target_fibo
+        # لو مفيش مقاومة واضحة فوق، نستخدم المسافة التقليدية
+        support = get_real_support(df)
+        return current_price + (current_price - support) * 1.5
 
 # ==============================
 # تحليل العملة
@@ -143,7 +133,7 @@ def analyze_coin(coin):
         if drop_percent < -40: score += 10
         probability = int(min(95, max(5, score * 1.2)))
 
-        # الدعم والهدف الاحترافي للبيع
+        # الدعم والهدف الحقيقي
         support = get_real_support(df)
         stop_loss = support * 0.97
         target = get_real_target(df, current_price)
@@ -156,10 +146,6 @@ def analyze_coin(coin):
         else:
             signal = "⚪ ضعيف"
 
-        # لو لسه السعر ما وصلش للـ Target النهائي لكن باقي الشروط متحققة → فرصة مراقبة
-        if not smart_setup and score >= 40:
-            signal = "🟡 مراقبة"
-
         return {
             "العملة": coin["symbol"].upper(),
             "السعر": round(current_price, 4),
@@ -169,8 +155,8 @@ def analyze_coin(coin):
             "Score": score,
             "احتمال %": probability,
             "Support": round(support, 4),
+            "Target": round(target, 4),
             "StopLoss": round(stop_loss, 4),
-            "Target البيع": round(target, 4),
             "Setup": "✅" if smart_setup else "❌",
             "التقييم": signal
         }
@@ -200,8 +186,8 @@ if st.button("🚀 فحص السوق"):
 
     if results:
         df = pd.DataFrame(results)
-        # ترتيب الفرص حسب القوة: Setup → Score → Probability
-        df = df.sort_values(by=["Setup", "Score", "احتمال %"], ascending=False)
+        # ترتيب العملات حسب Score من الأعلى للأقل
+        df = df.sort_values(by="Score", ascending=False)
         st.success(f"🔥 تم العثور على {len(df)} فرصة")
         st.dataframe(df, use_container_width=True)
     else:
