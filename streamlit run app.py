@@ -13,7 +13,7 @@ st.title("👑 Crypto Smart Money Scanner ELITE - Target احترافي + فرص
 MIN_VOLUME = 2_000_000
 TOTAL_COINS = 150
 RSI_PERIOD = 14
-OHLC_DAYS = 45  # بدل 60
+OHLC_DAYS = 30  # بدل 60
 MAX_WORKERS = 12
 SIDEWAYS_RANGE = 0.08
 VOL_MULTIPLIER = 1.2
