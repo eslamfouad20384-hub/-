@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(layout="wide")
-st.title(" Smart Money ")
+st.title("👑 Smart Money Scanner ELITE - النسخة النهائية")
 
 # ==============================
 # إعدادات
@@ -15,8 +15,13 @@ TOTAL_COINS = 150
 RSI_PERIOD = 14
 OHLC_DAYS = 30  # آخر 30 شمعة
 MAX_WORKERS = 12
-SIDEWAYS_RANGE = 0.08
+SIDEWAYS_RANGE = 0.12  # تم تخفيف الحركة العرضية
 VOL_MULTIPLIER = 1.2
+
+# ==============================
+# session state لإعادة الفحص
+if "run_scan" not in st.session_state:
+    st.session_state.run_scan = False
 
 # ==============================
 # جلب السوق
@@ -59,22 +64,22 @@ def calculate_rsi(df):
     return 100 - (100 / (1 + rs))
 
 # ==============================
-# إيجاد الدعم الحقيقي
+# الدعم الحقيقي
 def get_real_support(df):
     df['pivot_low'] = df['low'].rolling(5).min()
     return df['pivot_low'].mode()[0]  # القاع الأكثر تكرارًا
 
 # ==============================
-# إيجاد المقاومة الحقيقية (Target)
+# المقاومة الحقيقية (Target)
 def get_real_target(df, current_price):
     df['pivot_high'] = df['high'].rolling(5).max()
     highs = df['pivot_high'].unique()
     resistance_levels = [h for h in highs if h > current_price]
     if resistance_levels:
-        return min(resistance_levels)  # أقرب مقاومة فوق السعر الحالي
+        return min(resistance_levels)
     else:
         support = get_real_support(df)
-        return current_price + (current_price - support) * 1.5
+        return current_price + (current_price - support) * 1.61  # نسبة فيبوناتشي
 
 # ==============================
 # تحليل العملة
@@ -94,12 +99,12 @@ def analyze_coin(coin):
         df["ema200"] = df["close"].ewm(span=200).mean()
         latest = df.iloc[-1]
 
-        # الهبوط الحقيقي
-        max_price = df["high"].max()
+        # الهبوط الحقيقي محسّن
+        max_price = df["high"].rolling(OHLC_DAYS).max().iloc[-1]
         current_price = latest["close"]
         drop_percent = ((current_price - max_price) / max_price) * 100
 
-        # الحركة العرضية
+        # الحركة العرضية محسّنة
         recent = df.tail(10)
         high = recent["high"].max()
         low = recent["low"].min()
@@ -110,9 +115,10 @@ def analyze_coin(coin):
         volatility = recent["close"].std()
         low_volatility = volatility < (recent["close"].mean() * 0.02)
 
-        # Volume Rising
+        # Volume Rising محسّن
+        volume_series = df["close"] * (coin["total_volume"]/df["close"].sum())  # تقريب لحجم التداول لكل شمعة
+        volume_avg = volume_series.mean()
         volume_now = coin["total_volume"]
-        volume_avg = volume_now / 30
         volume_rising = volume_now > volume_avg * VOL_MULTIPLIER
 
         # Smart Money Setup
@@ -163,10 +169,9 @@ def analyze_coin(coin):
         return None
 
 # ==============================
-# تشغيل
-if st.button("🚀 فحص السوق"):
+# تشغيل الفحص
+def run_scan():
     st.info("⏳ جاري البحث عن فرص الانفجار...")
-
     coins = fetch_market_list()
     results = []
     progress = st.progress(0)
@@ -184,18 +189,21 @@ if st.button("🚀 فحص السوق"):
 
     if results:
         df = pd.DataFrame(results)
-        # ترتيب العملات حسب Score من الأعلى للأقل
         df = df.sort_values(by="Score", ascending=False)
 
-        # ترتيب الأعمدة حسب طلبك
         columns_order = ["العملة", "السعر", "هبوط %", "Setup", "التقييم",
                          "RSI", "Score", "احتمال %",
                          "Range %", "Support", "Target", "StopLoss"]
         df = df[columns_order]
 
-        # عرض الجدول بدون ترقيم الصفوف
         st.table(df.to_dict(orient="records"))
-
         st.success(f"🔥 تم العثور على {len(df)} فرصة")
     else:
         st.warning("❌ لا توجد فرص حالياً")
+
+# ==============================
+# الزر مع session state لإعادة الفحص
+if st.button("🚀 فحص السوق") or st.session_state.run_scan:
+    st.session_state.run_scan = True
+    run_scan()
+    st.session_state.run_scan = False
