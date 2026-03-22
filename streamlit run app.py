@@ -6,7 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(layout="wide")
-st.title("👑 Crypto Smart Money Scanner")
+st.title("👑 Crypto Smart Money Scanner ELITE - Target حقيقي")
 
 # ==============================
 # إعدادات
@@ -39,7 +39,7 @@ def fetch_market_list():
 def fetch_ohlc(symbol):
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{symbol}/ohlc"
-        params = {"vs_currency": "usd", "days": OHLC_DAYS}  # آخر 30 شمعة
+        params = {"vs_currency": "usd", "days": OHLC_DAYS}
         data = requests.get(url, params=params, timeout=10).json()
         df = pd.DataFrame(data, columns=["time","open","high","low","close"])
         df["time"] = pd.to_datetime(df["time"], unit='ms')
@@ -150,15 +150,15 @@ def analyze_coin(coin):
             "العملة": coin["symbol"].upper(),
             "السعر": round(current_price, 4),
             "هبوط %": round(drop_percent, 2),
-            "Range %": round(range_percent*100, 2),
+            "Setup": "✅" if smart_setup else "❌",
+            "التقييم": signal,
             "RSI": round(latest["rsi"], 2),
             "Score": score,
             "احتمال %": probability,
+            "Range %": round(range_percent*100, 2),
             "Support": round(support, 4),
             "Target": round(target, 4),
-            "StopLoss": round(stop_loss, 4),
-            "Setup": "✅" if smart_setup else "❌",
-            "التقييم": signal
+            "StopLoss": round(stop_loss, 4)
         }
 
     except:
@@ -188,6 +188,14 @@ if st.button("🚀 فحص السوق"):
         df = pd.DataFrame(results)
         # ترتيب العملات حسب Score من الأعلى للأقل
         df = df.sort_values(by="Score", ascending=False)
+
+        # ترتيب الأعمدة حسب طلبك + الغاء ترقيم الصفوف
+        columns_order = ["العملة", "السعر", "هبوط %", "Setup", "التقييم",
+                         "RSI", "Score", "احتمال %",
+                         "Range %", "Support", "Target", "StopLoss"]
+        df = df[columns_order]
+        df = df.reset_index(drop=True)  # الغي ترقيم الصفوف
+
         st.success(f"🔥 تم العثور على {len(df)} فرصة")
         st.dataframe(df, use_container_width=True)
     else:
