@@ -3,10 +3,11 @@ import requests
 import pandas as pd
 import numpy as np
 import time
+import os
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف مناطق التجميع + RSI (نسخة محسنة 3.0)")
+st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة محسنة 4.0)")
 
 # ==============================
 # إعدادات
@@ -18,6 +19,10 @@ DELAY = 1  # ثانية لكل طلب OHLC
 TOTAL_COINS = 200
 RSI_PERIOD = 14
 OHLC_DAYS = 30  # آخر 30 يوم
+CACHE_DIR = "cache"  # مجلد تخزين البيانات
+
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR)
 
 # ==============================
 # أدوات مساعدة
@@ -33,7 +38,7 @@ def fetch_market_list():
     }
     all_coins = []
     pages = TOTAL_COINS // 100 + (TOTAL_COINS % 100 > 0)
-    for page in range(1, pages+1):
+    for page in range(1, pages + 1):
         params["page"] = page
         try:
             data = requests.get(url, params=params, timeout=10).json()
@@ -46,24 +51,35 @@ def fetch_market_list():
 def pre_filter_coins(coins):
     filtered = []
     for coin in coins:
+        if not isinstance(coin, dict):
+            continue
         price = coin.get("current_price")
         volume = coin.get("total_volume")
         change_30d = coin.get("price_change_percentage_30d_in_currency")
-        if price is None or volume < MIN_VOLUME:
+        if price is None or volume is None or change_30d is None:
             continue
-        if change_30d is None or change_30d > DROP_THRESHOLD:
+        if volume < MIN_VOLUME:
+            continue
+        if change_30d > DROP_THRESHOLD:
             continue
         filtered.append(coin)
     return filtered
 
 def fetch_ohlc_daily(symbol):
-    """جلب بيانات يومية لآخر 30 يوم من CoinGecko"""
+    """جلب بيانات يومية لآخر 30 يوم مع التخزين المؤقت"""
+    cache_file = os.path.join(CACHE_DIR, f"{symbol}_ohlc.csv")
+    if os.path.exists(cache_file):
+        df = pd.read_csv(cache_file, parse_dates=["time"])
+        # تحديث إذا البيانات قديمة
+        if (pd.Timestamp.now() - df["time"].max()).days < 1:
+            return df
     try:
         url = f"https://api.coingecko.com/api/v3/coins/{symbol.lower()}/ohlc"
         params = {"vs_currency": "usd", "days": OHLC_DAYS}
         r = requests.get(url, params=params, timeout=10).json()
-        df = pd.DataFrame(r, columns=["time","open","high","low","close"])
+        df = pd.DataFrame(r, columns=["time", "open", "high", "low", "close"])
         df["time"] = pd.to_datetime(df["time"], unit='ms')
+        df.to_csv(cache_file, index=False)
         time.sleep(DELAY)
         return df
     except:
@@ -99,7 +115,7 @@ def calculate_score(df):
     if "volumeto" not in df.columns:
         df["volumeto"] = df.get("volumefrom", 0) * df["close"]
     avg_vol = df["volumeto"].rolling(20).mean().iloc[-1] if "volumeto" in df else 0
-    if latest.get("volumeto",0) > avg_vol:
+    if latest.get("volumeto", 0) > avg_vol:
         score += 10
     return score
 
@@ -117,8 +133,8 @@ def analyze_coin(coin):
         latest_price = df.iloc[-1]["close"]
         high = df["high"].max()
         low = df["low"].min()
-        range_pct = (high - low)/low
-        touches = sum(df["low"] <= low*1.02)
+        range_pct = (high - low) / low
+        touches = sum(df["low"] <= low * 1.02)
         if score >= 50:
             signal = "🔥 فرصة قوية"
         elif score >= 30:
@@ -128,10 +144,10 @@ def analyze_coin(coin):
         return {
             "العملة": symbol.upper(),
             "السعر": latest_price,
-            "RSI": round(df["rsi"].iloc[-1],2),
+            "RSI": round(df["rsi"].iloc[-1], 2),
             "Score": score,
             "لمسات الدعم": touches,
-            "النطاق %": round(range_pct*100,2),
+            "النطاق %": round(range_pct * 100, 2),
             "التقييم": signal
         }
     except:
