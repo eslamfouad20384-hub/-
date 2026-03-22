@@ -4,183 +4,202 @@ import pandas as pd
 import numpy as np
 import time
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة تحليلية 7.0)")
+st.title("👑 Crypto Scanner AI ELITE")
 
 # ==============================
 # إعدادات
 # ==============================
 MIN_VOLUME = 2_000_000
-DROP_THRESHOLD = -20
-TOTAL_COINS = 100
+TOTAL_COINS = 150
 RSI_PERIOD = 14
 OHLC_DAYS = 30
 CACHE_DIR = "cache"
+MAX_WORKERS = 12
 
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR)
 
 # ==============================
-# أدوات مساعدة
+# جلب السوق
 # ==============================
 def fetch_market_list():
     url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {"vs_currency": "usd", "order": "volume_desc", "per_page": 100, "page":1, "price_change_percentage":"30d"}
-    all_coins = []
-    pages = TOTAL_COINS // 100 + (TOTAL_COINS % 100 > 0)
-    for page in range(1, pages+1):
+    params = {
+        "vs_currency": "usd",
+        "order": "volume_desc",
+        "per_page": 100,
+        "page": 1
+    }
+
+    coins = []
+    for page in range(1, 3):
         params["page"] = page
         try:
             data = requests.get(url, params=params, timeout=10).json()
-            all_coins.extend(data)
+            coins.extend(data)
         except:
             continue
         time.sleep(1)
-    return all_coins[:TOTAL_COINS]
 
-def pre_filter_coins(coins):
-    filtered = []
-    for coin in coins:
-        if not isinstance(coin, dict):
-            continue
-        price = coin.get("current_price")
-        volume = coin.get("total_volume")
-        change_30d = coin.get("price_change_percentage_30d_in_currency")
-        if price is None or volume is None or change_30d is None:
-            continue
-        if volume < MIN_VOLUME:
-            continue
-        if change_30d > DROP_THRESHOLD:
-            continue
-        filtered.append(coin)
-    return filtered
+    return coins[:TOTAL_COINS]
 
-def fetch_ohlc_daily(symbol):
-    cache_file = os.path.join(CACHE_DIR, f"{symbol}_ohlc.csv")
-    if os.path.exists(cache_file):
-        df = pd.read_csv(cache_file, parse_dates=["time"])
-        if (pd.Timestamp.now() - df["time"].max()).days < 1:
-            return df
+# ==============================
+# OHLC
+# ==============================
+def fetch_ohlc(symbol):
     try:
-        url = f"https://api.coingecko.com/api/v3/coins/{symbol.lower()}/ohlc"
+        url = f"https://api.coingecko.com/api/v3/coins/{symbol}/ohlc"
         params = {"vs_currency": "usd", "days": OHLC_DAYS}
-        r = requests.get(url, params=params, timeout=10).json()
-        df = pd.DataFrame(r, columns=["time","open","high","low","close"])
+        data = requests.get(url, params=params, timeout=10).json()
+
+        df = pd.DataFrame(data, columns=["time","open","high","low","close"])
         df["time"] = pd.to_datetime(df["time"], unit='ms')
-        df.to_csv(cache_file, index=False)
         return df
     except:
         return pd.DataFrame()
 
-def calculate_rsi(df, period=RSI_PERIOD):
+# ==============================
+# RSI
+# ==============================
+def calculate_rsi(df):
     delta = df["close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
+    avg_gain = gain.rolling(RSI_PERIOD).mean()
+    avg_loss = loss.rolling(RSI_PERIOD).mean()
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-def add_indicators(df):
-    df["ema50"] = df["close"].ewm(span=50).mean()
-    df["ema200"] = df["close"].ewm(span=200).mean()
-    df["rsi"] = calculate_rsi(df)
-    return df
-
-def calculate_score(df):
-    latest = df.iloc[-1]
-    score = 0
-    if latest["rsi"] < 50:
-        score += 20
-    if latest["ema50"] > latest["ema200"]:
-        score += 20
-    return score
-
 # ==============================
-# تحليل عملة واحدة مع تفصيل كل خطوة
+# تحليل العملة
 # ==============================
 def analyze_coin(coin):
-    symbol = coin["symbol"]
-    df = fetch_ohlc_daily(symbol)
-    if df.empty or len(df) < RSI_PERIOD:
+    if coin["total_volume"] < MIN_VOLUME:
         return None
 
-    df = add_indicators(df)
+    symbol = coin["id"]
+    df = fetch_ohlc(symbol)
+
+    if df.empty or len(df) < 20:
+        return None
+
+    df["rsi"] = calculate_rsi(df)
+    df["ema50"] = df["close"].ewm(span=50).mean()
+    df["ema200"] = df["close"].ewm(span=200).mean()
+
     latest = df.iloc[-1]
 
-    steps = {}
-    steps["RSI"] = "✅" if latest["rsi"] < 30 else "❌"
-    steps["EMA50>EMA200"] = "✅" if latest["ema50"] > latest["ema200"] else "❌"
+    # ==============================
+    # 🔍 الهبوط الحقيقي
+    # ==============================
+    max_price = df["high"].max()
+    current_price = latest["close"]
+    drop_percent = ((current_price - max_price) / max_price) * 100
 
-    low = df["low"].min()
-    touches = sum(df["low"] <= low * 1.02)
-    steps["لمسات الدعم"] = "✅" if touches >= 1 else "❌"
+    # ==============================
+    # 📊 Volume Profile
+    # ==============================
+    avg_volume = coin["total_volume"] / 30
+    volume_score = 1 if coin["total_volume"] > avg_volume else 0
 
-    score = calculate_score(df)
-    if score >= 40:
-        signal = "🔥 فرصة قوية"
-    elif score >= 20:
-        signal = "🟡 فرصة متوسطة"
+    # ==============================
+    # 🧠 AI Score
+    # ==============================
+    score = 0
+
+    # RSI
+    if latest["rsi"] < 30:
+        score += 25
+    elif latest["rsi"] < 40:
+        score += 15
+
+    # Trend
+    if latest["ema50"] > latest["ema200"]:
+        score += 25
+
+    # ارتداد من القاع
+    if current_price > df["low"].min() * 1.05:
+        score += 15
+
+    # Volume
+    score += volume_score * 15
+
+    # الهبوط
+    if drop_percent < -30:
+        score += 20
+
+    # ==============================
+    # 🎯 احتمال الصعود (AI)
+    # ==============================
+    probability = int(min(95, max(5, score * 1.3)))
+
+    # ==============================
+    # 📈 دعم + Target + StopLoss
+    # ==============================
+    support = df["low"].tail(10).min()
+
+    target = current_price + (current_price - support) * 1.5
+    stop_loss = support * 0.97
+
+    # ==============================
+    # التقييم
+    # ==============================
+    if score >= 70:
+        signal = "🔥 قوية"
+    elif score >= 40:
+        signal = "🟡 متوسطة"
     else:
         signal = "⚪ ضعيف"
 
     return {
-        "العملة": symbol.upper(),
-        "السعر": latest["close"],
-        "RSI": round(latest["rsi"],2),
-        "EMA50": round(latest["ema50"],2),
-        "EMA200": round(latest["ema200"],2),
-        "لمسات الدعم": touches,
+        "العملة": coin["symbol"].upper(),
+        "السعر": round(current_price, 4),
+        "هبوط %": round(drop_percent, 2),
+        "RSI": round(latest["rsi"], 2),
         "Score": score,
-        "التقييم": signal,
-        "RSI_OK": steps["RSI"],
-        "EMA_OK": steps["EMA50>EMA200"],
-        "Support_OK": steps["لمسات الدعم"]
+        "احتمال %": probability,
+        "Support": round(support, 4),
+        "Target": round(target, 4),
+        "StopLoss": round(stop_loss, 4),
+        "التقييم": signal
     }
 
-def color_score(val):
-    if val == "🔥 فرصة قوية":
-        return 'background-color: #FF5733; color: white'
-    elif val == "🟡 فرصة متوسطة":
-        return 'background-color: #FFC300; color: black'
-    else:
-        return 'background-color: #C0C0C0; color: black'
-
 # ==============================
-# تشغيل الفحص وعرض كل خطوة
+# تشغيل
 # ==============================
-if st.button("🚀 ابدأ الفحص"):
-    st.info(f"⏳ جاري فحص {TOTAL_COINS} عملة بعد الفلترة...")
+if st.button("🚀 فحص السوق"):
     coins = fetch_market_list()
-    filtered_coins = pre_filter_coins(coins)
+
     results = []
+    progress = st.progress(0)
 
-    success_count = 0
-    fail_count = 0
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(analyze_coin, coin) for coin in coins]
 
-    progress_text = st.empty()
-    progress_bar = st.progress(0)
-    total = len(filtered_coins)
+        for i, f in enumerate(as_completed(futures)):
+            try:
+                res = f.result()
+                if res:
+                    results.append(res)
+            except:
+                pass
 
-    for i, coin in enumerate(filtered_coins):
-        res = analyze_coin(coin)
-        symbol = coin["symbol"].upper()
-        if res:
-            results.append(res)
-            success_count += 1
-            st.write(f"✅ {symbol} تم جلب البيانات بنجاح: RSI {res['RSI_OK']}, EMA {res['EMA_OK']}, Support {res['Support_OK']}")
-        else:
-            fail_count += 1
-            st.write(f"⚠️ {symbol} فشل جلب البيانات")
-        progress_text.text(f"جاري الفحص: {i+1}/{total} عملة")
-        progress_bar.progress((i+1)/total)
-
-    st.write(f"🌟 العملات التي تم جلب بياناتها بنجاح: {success_count}")
-    st.write(f"⚠️ العملات التي فشل تحميل بياناتها: {fail_count}")
+            progress.progress((i+1)/len(futures))
 
     if results:
-        df_results = pd.DataFrame(results).sort_values(by="Score", ascending=False)
-        st.dataframe(df_results.style.applymap(color_score, subset=["التقييم"]), use_container_width=True)
+        df = pd.DataFrame(results)
+
+        df = df.sort_values(
+            by=["Score", "احتمال %"],
+            ascending=False
+        )
+
+        st.success(f"✅ {len(df)} فرصة جاهزة")
+
+        st.dataframe(df, use_container_width=True)
+
     else:
-        st.warning("❌ لا توجد فرص حالياً")
+        st.warning("❌ مفيش فرص حالياً")
