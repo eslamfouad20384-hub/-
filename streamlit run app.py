@@ -7,7 +7,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 st.set_page_config(layout="wide")
-st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة محسنة 5.0)")
+st.title("📊 كاشف فرص العملات الرقمية + RSI (نسخة نهائية 5.1)")
 
 # ==============================
 # إعدادات
@@ -70,7 +70,6 @@ def fetch_ohlc_daily(symbol):
     cache_file = os.path.join(CACHE_DIR, f"{symbol}_ohlc.csv")
     if os.path.exists(cache_file):
         df = pd.read_csv(cache_file, parse_dates=["time"])
-        # تحديث إذا البيانات قديمة
         if (pd.Timestamp.now() - df["time"].max()).days < 1:
             return df
     try:
@@ -177,19 +176,33 @@ if st.button("🚀 ابدأ الفحص"):
     progress_bar = st.progress(0)
     total = len(filtered_coins)
 
+    success_data = 0
+    fail_data = 0
+
     with ThreadPoolExecutor(max_workers=THREADS) as executor:
         futures = [executor.submit(analyze_coin, coin) for coin in filtered_coins]
         for i, future in enumerate(futures):
             result = future.result()
             if result:
                 results.append(result)
+                success_data += 1
+            else:
+                fail_data += 1
             progress_text.text(f"جاري الفحص: {i+1}/{total} عملة")
             progress_bar.progress((i+1)/total)
+
+    st.info(f"🌟 العملات التي تم جلب بياناتها بنجاح: {success_data}")
+    st.warning(f"⚠️ العملات التي فشل تحميل بياناتها: {fail_data}")
 
     if results:
         df_results = pd.DataFrame(results)
         df_results = df_results.sort_values(by="Score", ascending=False)
-        st.success(f"✅ تم العثور على {len(df_results)} فرصة قوية")
+
+        # عداد النجاح والفشل حسب التقييم
+        success_count = df_results[df_results["التقييم"].isin(["🔥 فرصة قوية", "🟡 فرصة متوسطة"])].shape[0]
+        fail_count = df_results[df_results["التقييم"] == "⚪ ضعيف"].shape[0]
+
+        st.success(f"✅ عدد العملات الناجحة حسب التقييم: {success_count} | عدد العملات الفاشلة: {fail_count}")
         st.dataframe(df_results.style.applymap(color_score, subset=["التقييم"]), use_container_width=True)
     else:
         st.warning("❌ لا توجد فرص حالياً")
